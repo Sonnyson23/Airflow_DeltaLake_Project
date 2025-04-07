@@ -432,6 +432,8 @@ task_run_spark_transformation = SSHOperator(
     task_id='run_spark_transformation',
     ssh_conn_id='spark_ssh_conn',
     command="""
+    # Spark'ın kullanacağı Python ortamına boto3 kur
+    pip install boto3 && \
     cd /tmp && \
     spark-submit --master local[*] \
     --packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4 \
