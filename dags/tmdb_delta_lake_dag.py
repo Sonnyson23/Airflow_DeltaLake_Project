@@ -12,7 +12,7 @@ from airflow.models import Variable
 from airflow.providers.ssh.operators.ssh import SSHOperator
 from airflow.providers.ssh.hooks.ssh import SSHHook
 
-# DAG tanımı ve varsayılan argümanlar
+# DAG definition and default arguments
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
@@ -22,61 +22,61 @@ default_args = {
     'retry_delay': timedelta(minutes=5),
 }
 
-# MinIO bağlantı bilgileri
+# MinIO connection information
 MINIO_ENDPOINT = Variable.get("endpoint_url", default_var="http://minio:9000")
 AWS_ACCESS_KEY = Variable.get("aws_access_key_id", default_var="dataops")
-AWS_SECRET_KEY = Variable.get("aws_secret_access_key", default_var="********")
+AWS_SECRET_KEY = Variable.get("aws_secret_access_key", default_var="root12345")
 
-# Spark SSH bağlantısı
-SPARK_SSH_CONN_ID = 'spark_ssh'
+# Spark SSH connection
+SPARK_SSH_CONN_ID = 'spark_ssh_conn'
 
-# Veri setlerinin URL'leri
+# Dataset URLs
 TMDB_CREDITS_URL = "https://github.com/erkansirin78/datasets/raw/master/tmdb_5000_movies_and_credits.zip"
 
-# MinIO bucket isimleri
+# MinIO bucket names
 BRONZE_BUCKET = "tmdb-bronze"
 SILVER_BUCKET = "tmdb-silver"
 
-# Veri setlerini indirme fonksiyonu
+# Function to download datasets
 def download_datasets(**context):
-    """TMDB veri setlerini indirir ve geçici bir dizine kaydeder"""
+    """Downloads TMDB datasets and saves them to a temporary directory"""
     import zipfile
     import requests
     import os
     
-    # Geçici dizin oluştur
+    # Create temporary directory
     temp_dir = "/tmp/tmdb_data"
     os.makedirs(temp_dir, exist_ok=True)
     
-    # Zip dosyasını indir
+    # Download zip file
     zip_path = f"{temp_dir}/tmdb_data.zip"
     response = requests.get(TMDB_CREDITS_URL)
     with open(zip_path, 'wb') as f:
         f.write(response.content)
     
-    # Zip dosyasını aç
+    # Extract zip file
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(temp_dir)
     
-    # Dosya yollarını XCom ile paylaş
+    # Share file paths via XCom
     context['ti'].xcom_push(key='credits_path', value=f"{temp_dir}/tmdb_5000_credits.csv")
     context['ti'].xcom_push(key='movies_path', value=f"{temp_dir}/tmdb_5000_movies.csv")
     
     return {"credits_path": f"{temp_dir}/tmdb_5000_credits.csv", 
             "movies_path": f"{temp_dir}/tmdb_5000_movies.csv"}
 
-# MinIO'ya veri yükleme fonksiyonu
+# Function to upload data to MinIO
 def upload_to_minio(**context):
-    """İndirilen veri setlerini MinIO'ya yükler"""
+    """Uploads downloaded datasets to MinIO"""
     import boto3
     from botocore.client import Config
     
-    # XCom'dan dosya yollarını al
+    # Get file paths from XCom
     ti = context['ti']
     credits_path = ti.xcom_pull(task_ids='download_datasets', key='credits_path')
     movies_path = ti.xcom_pull(task_ids='download_datasets', key='movies_path')
     
-    # MinIO bağlantısı oluştur
+    # Create MinIO connection
     s3_client = boto3.client(
         's3',
         endpoint_url=MINIO_ENDPOINT,
@@ -86,23 +86,23 @@ def upload_to_minio(**context):
         region_name='us-east-1'
     )
     
-    # Bucket'ları oluştur (eğer yoksa)
+    # Create buckets (if they don't exist)
     for bucket in [BRONZE_BUCKET, SILVER_BUCKET]:
         try:
             s3_client.head_bucket(Bucket=bucket)
         except:
             s3_client.create_bucket(Bucket=bucket)
     
-    # Dosyaları yükle
+    # Upload files
     s3_client.upload_file("/tmp/tmdb_data/tmdb_5000_movies_and_credits/tmdb_5000_credits.csv", BRONZE_BUCKET, "credits/credits_part_001.csv")
     s3_client.upload_file("/tmp/tmdb_data/tmdb_5000_movies_and_credits/tmdb_5000_movies.csv", BRONZE_BUCKET, "movies/movies_part_001.csv")
 
     
-    return "Dosyalar MinIO'ya başarıyla yüklendi"
+    return "Files successfully uploaded to MinIO"
 
-# Spark ile veri dönüşümü için PySpark kodu
+# PySpark code for data transformation
 def generate_spark_transformation_script(**context):
-    """Spark ile veri dönüşümü için PySpark kodu oluşturur"""
+    """Generates PySpark code for data transformation"""
     
     spark_script = """
 from pyspark.sql import SparkSession
@@ -112,7 +112,7 @@ import boto3
 from botocore.client import Config
 from delta.tables import *
 
-# Spark oturumu oluştur
+# Create Spark session
 spark = (SparkSession.builder
          .appName("TMDB Data Transformation")
          .config("spark.jars.packages", "io.delta:delta-spark_2.12:3.2.0")
@@ -120,28 +120,28 @@ spark = (SparkSession.builder
          .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
          .getOrCreate())
 
-# MinIO bağlantı bilgileri
+# MinIO connection information
 minio_endpoint = "http://minio:9000"
 aws_access_key = "dataops"
 aws_secret_key = "root12345"
 
-# S3 yapılandırması
+# S3 configuration
 spark.conf.set("spark.hadoop.fs.s3a.endpoint", minio_endpoint)
 spark.conf.set("spark.hadoop.fs.s3a.access.key", aws_access_key)
 spark.conf.set("spark.hadoop.fs.s3a.secret.key", aws_secret_key)
 spark.conf.set("spark.hadoop.fs.s3a.path.style.access", "true")
 spark.conf.set("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
 
-# MinIO'dan veri okuma
+# Read data from MinIO
 credits_df = spark.read.csv("s3a://tmdb-bronze/credits/", header=True, multiLine=True, escape='"')
 movies_df = spark.read.csv("s3a://tmdb-bronze/movies/", header=True, multiLine=True, escape='"')
 
-# Veri temizleme ve dönüştürme işlemleri
-# 1. Cast tablosu oluşturma
+# Data cleaning and transformation operations
+# 1. Create Cast table
 from pyspark.sql.functions import explode, col, lit
 import json
 
-# Cast JSON verilerini parse etme
+# Parse Cast JSON data
 def parse_cast(cast_json):
     try:
         cast_data = json.loads(cast_json.replace("'", '"'))
@@ -151,7 +151,7 @@ def parse_cast(cast_json):
 
 parse_cast_udf = F.udf(parse_cast, ArrayType(MapType(StringType(), StringType())))
 
-# Cast verilerini ayıklama
+# Extract cast data
 credits_with_cast = credits_df.withColumn("cast_data", parse_cast_udf(col("cast")))
 cast_df = credits_with_cast.select(
     col("movie_id"),
@@ -168,10 +168,10 @@ cast_df = credits_with_cast.select(
     col("cast_member.name").alias("name")
 )
 
-# Null değerleri doldurma
+# Fill null values
 cast_df = cast_df.fillna({"credit_id": "0000000000"})
 
-# 2. Crew tablosu oluşturma
+# 2. Create Crew table
 def parse_crew(crew_json):
     try:
         crew_data = json.loads(crew_json.replace("'", '"'))
@@ -181,7 +181,7 @@ def parse_crew(crew_json):
 
 parse_crew_udf = F.udf(parse_crew, ArrayType(MapType(StringType(), StringType())))
 
-# Crew verilerini ayıklama
+# Extract crew data
 credits_with_crew = credits_df.withColumn("crew_data", parse_crew_udf(col("crew")))
 crew_df = credits_with_crew.select(
     col("movie_id"),
@@ -198,11 +198,11 @@ crew_df = credits_with_crew.select(
     col("crew_member.name").alias("name")
 )
 
-# Null değerleri doldurma
+# Fill null values
 crew_df = crew_df.fillna({"credit_id": "0000000000"})
 
-# 3. Movies tablosu oluşturma
-# JSON sütunlarını parse etme fonksiyonları
+# 3. Create Movies table
+# Functions to parse JSON columns
 def extract_value(json_str, key):
     try:
         data = json.loads(json_str.replace("'", '"'))
@@ -210,7 +210,7 @@ def extract_value(json_str, key):
     except:
         return None
 
-# Movies tablosunu oluşturma
+# Create Movies table
 movies_clean_df = movies_df.select(
     col("id").alias("movie_id"),
     col("title"),
@@ -229,7 +229,7 @@ movies_clean_df = movies_df.select(
     col("vote_count").cast("integer")
 )
 
-# 4. Genres tablosu oluşturma
+# 4. Create Genres table
 def parse_genres(genres_json):
     try:
         genres_data = json.loads(genres_json.replace("'", '"'))
@@ -239,7 +239,7 @@ def parse_genres(genres_json):
 
 parse_genres_udf = F.udf(parse_genres, ArrayType(MapType(StringType(), StringType())))
 
-# Genres verilerini ayıklama
+# Extract genres data
 movies_with_genres = movies_df.withColumn("genres_data", parse_genres_udf(col("genres")))
 genres_df = movies_with_genres.select(
     col("id").alias("movie_id"),
@@ -250,10 +250,10 @@ genres_df = movies_with_genres.select(
     col("genre.name")
 )
 
-# Null değerleri doldurma
+# Fill null values
 genres_df = genres_df.fillna({"id": -9999})
 
-# 5. Keywords tablosu oluşturma
+# 5. Create Keywords table
 def parse_keywords(keywords_json):
     try:
         keywords_data = json.loads(keywords_json.replace("'", '"'))
@@ -263,7 +263,7 @@ def parse_keywords(keywords_json):
 
 parse_keywords_udf = F.udf(parse_keywords, ArrayType(MapType(StringType(), StringType())))
 
-# Keywords verilerini ayıklama
+# Extract keywords data
 movies_with_keywords = movies_df.withColumn("keywords_data", parse_keywords_udf(col("keywords")))
 keywords_df = movies_with_keywords.select(
     col("id").alias("movie_id"),
@@ -274,10 +274,10 @@ keywords_df = movies_with_keywords.select(
     col("keyword.name")
 )
 
-# Null değerleri doldurma
+# Fill null values
 keywords_df = keywords_df.fillna({"id": -9999})
 
-# 6. Production Companies tablosu oluşturma
+# 6. Create Production Companies table
 def parse_production_companies(pc_json):
     try:
         pc_data = json.loads(pc_json.replace("'", '"'))
@@ -287,7 +287,7 @@ def parse_production_companies(pc_json):
 
 parse_pc_udf = F.udf(parse_production_companies, ArrayType(MapType(StringType(), StringType())))
 
-# Production Companies verilerini ayıklama
+# Extract production companies data
 movies_with_pc = movies_df.withColumn("pc_data", parse_pc_udf(col("production_companies")))
 production_companies_df = movies_with_pc.select(
     col("id").alias("movie_id"),
@@ -298,10 +298,10 @@ production_companies_df = movies_with_pc.select(
     col("company.name")
 )
 
-# Null değerleri doldurma
+# Fill null values
 production_companies_df = production_companies_df.fillna({"id": -9999})
 
-# 7. Production Countries tablosu oluşturma
+# 7. Create Production Countries table
 def parse_production_countries(pc_json):
     try:
         pc_data = json.loads(pc_json.replace("'", '"'))
@@ -311,7 +311,7 @@ def parse_production_countries(pc_json):
 
 parse_countries_udf = F.udf(parse_production_countries, ArrayType(MapType(StringType(), StringType())))
 
-# Production Countries verilerini ayıklama
+# Extract production countries data
 movies_with_countries = movies_df.withColumn("countries_data", parse_countries_udf(col("production_countries")))
 production_countries_df = movies_with_countries.select(
     col("id").alias("movie_id"),
@@ -322,10 +322,10 @@ production_countries_df = movies_with_countries.select(
     col("country.name")
 )
 
-# Null değerleri doldurma
+# Fill null values
 production_countries_df = production_countries_df.fillna({"iso_3166_1": "XX"})
 
-# 8. Spoken Languages tablosu oluşturma
+# 8. Create Spoken Languages table
 def parse_spoken_languages(sl_json):
     try:
         sl_data = json.loads(sl_json.replace("'", '"'))
@@ -335,7 +335,7 @@ def parse_spoken_languages(sl_json):
 
 parse_languages_udf = F.udf(parse_spoken_languages, ArrayType(MapType(StringType(), StringType())))
 
-# Spoken Languages verilerini ayıklama
+# Extract spoken languages data
 movies_with_languages = movies_df.withColumn("languages_data", parse_languages_udf(col("spoken_languages")))
 spoken_languages_df = movies_with_languages.select(
     col("id").alias("movie_id"),
@@ -346,59 +346,59 @@ spoken_languages_df = movies_with_languages.select(
     col("language.name")
 )
 
-# Null değerleri doldurma
+# Fill null values
 spoken_languages_df = spoken_languages_df.fillna({"iso_639_1": "XX"})
 
-# Delta Lake formatında kaydetme
-# Cast tablosu
+# Save in Delta Lake format
+# Cast table
 cast_df.write.format("delta").mode("overwrite").save("s3a://tmdb-silver/cast")
 
-# Crew tablosu
+# Crew table
 crew_df.write.format("delta").mode("overwrite").save("s3a://tmdb-silver/crew")
 
-# Movies tablosu
+# Movies table
 movies_clean_df.write.format("delta").mode("overwrite").save("s3a://tmdb-silver/movies")
 
-# Genres tablosu
+# Genres table
 genres_df.write.format("delta").mode("overwrite").save("s3a://tmdb-silver/genres")
 
-# Keywords tablosu
+# Keywords table
 keywords_df.write.format("delta").mode("overwrite").save("s3a://tmdb-silver/keywords")
 
-# Production Companies tablosu
+# Production Companies table
 production_companies_df.write.format("delta").mode("overwrite").save("s3a://tmdb-silver/production_companies")
 
-# Production Countries tablosu
+# Production Countries table
 production_countries_df.write.format("delta").mode("overwrite").save("s3a://tmdb-silver/production_countries")
 
-# Spoken Languages tablosu
+# Spoken Languages table
 spoken_languages_df.write.format("delta").mode("overwrite").save("s3a://tmdb-silver/spoken_languages")
 
-print("Veri dönüşümü tamamlandı ve Delta Lake formatında kaydedildi.")
+print("Data transformation completed and saved in Delta Lake format.")
     """
     
-    # PySpark kodunu dosyaya yaz
+    # Write PySpark code to file
     script_path = "/tmp/tmdb_transformation.py"
     with open(script_path, "w") as f:
         f.write(spark_script)
     
-    # Dosya yolunu XCom ile paylaş
+    # Share file path via XCom
     context['ti'].xcom_push(key='spark_script_path', value=script_path)
     
     return script_path
 
-# DAG tanımı
+# DAG definition
 dag = DAG(
     'tmdb_delta_lake_pipeline',
     default_args=default_args,
-    description='TMDB verilerini işleyip Delta Lake formatında depolayan pipeline',
+    description='Pipeline to process TMDB data and store in Delta Lake format',
     schedule_interval='@daily',
     start_date=datetime(2025, 4, 7),
     catchup=False,
     tags=['tmdb', 'delta_lake', 'spark'],
 )
 
-# Görevleri tanımla
+# Define tasks
 task_download_datasets = PythonOperator(
     task_id='download_datasets',
     python_callable=download_datasets,
@@ -420,76 +420,34 @@ task_generate_spark_script = PythonOperator(
     dag=dag,
 )
 
-# Spark dönüşümünü çalıştır
-
-# Bash komutunu Python string olarak tanımlayın (Jinja templating ile)
-bash_command_script = """
-# Herhangi bir komut başarısız olursa betiği durdurur
-set -e
-
-# Airflow Variable'dan şifreyi almak için Jinja kullanın
-SSH_PASSWORD="{{ var.value.ssh_train_password }}"
-
-# İndirilecek betiğin direkt URL'si (GitHub Raw)
-# Dikkat: URL'nin doğru olduğundan emin olun!
-SCRIPT_URL="https://raw.githubusercontent.com/Sonnyson23/Airflow_DeltaLake_Project/refs/heads/main/python_apps/tmdb_data_generator.py"
-
-# Betiğin indirileceği lokal geçici dosya yolu (Airflow worker üzerinde)
-LOCAL_SCRIPT_PATH="/tmp/tmdb_data_generator.py"
-
-# Betiğin kopyalanacağı hedef (remote) sunucudaki tam yol
-REMOTE_SCRIPT_PATH="/tmp/tmdb_data_generator.py" # Hedefte aynı isim kalsın
-
-echo "Python betiği indiriliyor: $SCRIPT_URL -> $LOCAL_SCRIPT_PATH"
-# curl ile betiği indir (-f: hata varsa hemen çık, -s: sessiz mod, -L: yönlendirmeleri takip et, -o: çıktı dosyası)
-# Eğer curl yoksa wget deneyebilirsiniz: wget -q -O "$LOCAL_SCRIPT_PATH" "$SCRIPT_URL"
-curl -fsSL -o "$LOCAL_SCRIPT_PATH" "$SCRIPT_URL"
-
-# İndirme başarılı oldu mu kontrol et (curl -f ile hata durumunda 0'dan farklı çıkış kodu döner)
-if [ $? -ne 0 ]; then
-    echo "Hata: Python betiği indirilemedi: $SCRIPT_URL"
-    exit 1
-fi
-
-# Dosyanın gerçekten oluşup oluşmadığını ve boş olmadığını kontrol et
-if [ ! -s "$LOCAL_SCRIPT_PATH" ]; then # -s: dosya var ve boyutu 0'dan büyük mü?
-    echo "Hata: İndirilen betik dosyası bulunamadı veya boş: $LOCAL_SCRIPT_PATH"
-    exit 1
-fi
-
-echo "Python betiği ($LOCAL_SCRIPT_PATH) bulundu. $REMOTE_SCRIPT_PATH adresine kopyalanıyor..."
-# scp ile betiği Spark client'a kopyala
-scp "$LOCAL_SCRIPT_PATH" "ssh_train@spark_client:$REMOTE_SCRIPT_PATH"
-
-echo "Spark görevi çalıştırılıyor ($REMOTE_SCRIPT_PATH)..."
-# sshpass ile şifreyi kullanarak ssh bağlantısı yap ve Spark komutunu çalıştır
-sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ssh_train@spark_client "cd /tmp && \\
-spark-submit --master local[*] \\
---packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4 \\
---conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \\
---conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \\
---conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \\
---conf spark.hadoop.fs.s3a.access.key=dataops \\
---conf spark.hadoop.fs.s3a.secret.key=root12345 \\
---conf spark.hadoop.fs.s3a.path.style.access=true \\
---conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \\
-$REMOTE_SCRIPT_PATH"
-
-echo "Spark görevi komutu gönderildi. Lokal betik temizleniyor."
-# İndirilen lokal betiği temizle
-rm -f "$LOCAL_SCRIPT_PATH"
-
-echo "Görev tamamlandı."
-"""
-
-# BashOperator tanımı
-# Task ID'yi projenize daha uygun bir isimle değiştirebilirsiniz,
-# örneğin 'run_tmdb_data_generator'
-task_run_spark_transformation = BashOperator(
-    task_id='run_spark_transformation', # Task ID güncellendi (öneri)
-    bash_command=bash_command_script,
-    dag=dag
+# Add a task to transfer the script to Spark container
+task_transfer_script = SSHOperator(
+    task_id='transfer_script',
+    ssh_conn_id='spark_ssh_conn',
+    command="mkdir -p /tmp",
+    dag=dag,
 )
 
-# Görev bağımlılıklarını ayarla
-task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_run_spark_transformation
+# Run Spark transformation using SSHOperator instead of BashOperator
+task_run_spark_transformation = SSHOperator(
+    task_id='run_spark_transformation',
+    ssh_conn_id='spark_ssh_conn',
+    command="""
+    cd /tmp && \
+    spark-submit --master local[*] \
+    --packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4 \
+    --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \
+    --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \
+    --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
+    --conf spark.hadoop.fs.s3a.access.key=dataops \
+    --conf spark.hadoop.fs.s3a.secret.key=root12345 \
+    --conf spark.hadoop.fs.s3a.path.style.access=true \
+    --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+    /tmp/tmdb_transformation.py
+    """,
+    get_pty=True,  # Add this for better error reporting
+    dag=dag,
+)
+
+# Set task dependencies
+task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_transfer_script >> task_run_spark_transformation
