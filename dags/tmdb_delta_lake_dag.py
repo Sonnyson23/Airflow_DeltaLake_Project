@@ -94,7 +94,8 @@ def upload_to_minio(**context):
             s3_client.create_bucket(Bucket=bucket)
     
     # Dosyaları yükle
-    s3_client.upload_file(credits_path, BRONZE_BUCKET, "credits/credits_part_001.csv")
+    #s3_client.upload_file(credits_path, BRONZE_BUCKET, "credits/credits_part_001.csv")
+    s3_client.upload_file("/tmp/tmdb_data/tmdb_5000_movies_and_credits/tmdb_5000_credits.csv", BRONZE_BUCKET, "credits/credits_part_001.csv")
     s3_client.upload_file(movies_path, BRONZE_BUCKET, "movies/movies_part_001.csv")
     
     return "Dosyalar MinIO'ya başarıyla yüklendi"
@@ -405,12 +406,6 @@ task_download_datasets = PythonOperator(
     dag=dag,
 )
 
-find_file = BashOperator(
-    task_id='find_file',
-    bash_command="find / -name 'tmdb_5000_credits.csv' -print",
-    dag=dag,
-)
-
 task_upload_to_minio = PythonOperator(
     task_id='upload_to_minio',
     python_callable=upload_to_minio,
@@ -446,4 +441,4 @@ task_run_spark_transformation = BashOperator(
 )
 
 # Görev bağımlılıklarını ayarla
-task_download_datasets >> find_file >> task_upload_to_minio >> task_generate_spark_script >> task_run_spark_transformation
+task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_run_spark_transformation
