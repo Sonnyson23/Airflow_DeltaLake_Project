@@ -424,13 +424,12 @@ task_generate_spark_script = PythonOperator(
 task_run_spark_transformation = BashOperator(
     task_id='run_spark_transformation',
     bash_command="""
-        GIT_REPO_URL=<repo_url> &&
-        SSH_PASSWORD=$(airflow variables get ssh_train_password) &&
-        git clone $GIT_REPO_URL /tmp/tmdb_transformation_repo &&
-        scp /tmp/tmdb_transformation_repo/tmdb_transformation.py ssh_train@spark_client:/tmp/tmdb_transformation.py &&
-        sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no ssh_train@spark_client
-        "cd /tmp &&
-        spark-submit --master local[*]
+        GIT_REPO_URL=<repo_url>
+        SSH_PASSWORD=$(airflow variables get ssh_train_password)
+        git clone $GIT_REPO_URL /tmp/tmdb_transformation_repo
+        scp /tmp/tmdb_transformation_repo/tmdb_transformation.py ssh_train@spark_client:/tmp/tmdb_transformation.py
+        sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no ssh_train@spark_client "cd /tmp && 
+        spark-submit --master local[*] 
         --packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4
         --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
         --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog
