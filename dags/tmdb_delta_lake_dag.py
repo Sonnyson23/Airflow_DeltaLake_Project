@@ -432,7 +432,7 @@ SSH_PASSWORD="{{ var.value.ssh_train_password }}"
 
 # İndirilecek betiğin direkt URL'si (GitHub Raw)
 # Dikkat: URL'nin doğru olduğundan emin olun!
-SCRIPT_URL="https://raw.githubusercontent.com/Sonnyson23/Airflow_DeltaLake_Project/main/python_apps/tmdb_data_generator.py"
+SCRIPT_URL="https://github.com/Sonnyson23/Airflow_DeltaLake_Project/blob/main/python_apps/tmdb_data_generator.py"
 
 # Betiğin indirileceği lokal geçici dosya yolu (Airflow worker üzerinde)
 LOCAL_SCRIPT_PATH="/tmp/tmdb_data_generator.py"
