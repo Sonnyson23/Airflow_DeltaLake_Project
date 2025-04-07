@@ -421,81 +421,26 @@ task_generate_spark_script = PythonOperator(
 )
 
 # Spark dönüşümünü çalıştır
-# DAG dosyanızın içinde (örnek)
-from airflow.operators.bash import BashOperator
-
-# Bash komutunu Python string olarak tanımlayın (Jinja templating ile)
-bash_command_script = """
-# Herhangi bir komut başarısız olursa betiği durdurur
-set -e
-
-# Git repo URL'si
-GIT_REPO_URL="https://github.com/Sonnyson23/Airflow_DeltaLake_Project.git"
-
-# Airflow Variable'dan şifreyi almak için Jinja kullanın
-SSH_PASSWORD="{{ var.value.ssh_train_password }}"
-
-# Klonlama yapılacak lokal dizin (öncekiyle karışmasın diye farklı isim)
-LOCAL_REPO_PATH="/tmp/tmdb_project_repo_cloned"
-
-# Kopyalanacak ve çalıştırılacak betiğin adı (Görseldeki gibi)
-SCRIPT_NAME="tmdb_data_generator.py"
-
-# Betiğin repo içindeki göreceli yolu (Görseldeki gibi)
-SCRIPT_REPO_RELATIVE_PATH="python_apps/$SCRIPT_NAME"
-
-# Betiğin klonlandıktan sonraki tam lokal yolu
-SCRIPT_LOCAL_FULL_PATH="$LOCAL_REPO_PATH/$SCRIPT_REPO_RELATIVE_PATH"
-
-# Betiğin kopyalanacağı hedef (remote) sunucudaki tam yol
-SCRIPT_REMOTE_PATH="/tmp/$SCRIPT_NAME"
-
-# Varsa önceki klonlanmış repoyu temizle
-rm -rf "$LOCAL_REPO_PATH"
-
-echo "Repo klonlanıyor: $GIT_REPO_URL -> $LOCAL_REPO_PATH"
-# Belirli bir dalı (main) klonla
-git clone --branch main $GIT_REPO_URL "$LOCAL_REPO_PATH"
-
-# Python betiğinin klonlanan repoda doğru yolda olup olmadığını kontrol et (Yol güncellendi)
-if [ -f "$SCRIPT_LOCAL_FULL_PATH" ]; then
-    echo "Python betiği ($SCRIPT_LOCAL_FULL_PATH) bulundu. $SCRIPT_REMOTE_PATH adresine kopyalanıyor..."
-    # scp ile betiği Spark client'a kopyala (Kaynak yol güncellendi)
-    scp "$SCRIPT_LOCAL_FULL_PATH" "ssh_train@spark_client:$SCRIPT_REMOTE_PATH"
-else
-    echo "Hata: $SCRIPT_NAME betiği klonlanan reponun '$SCRIPT_REPO_RELATIVE_PATH' dizininde bulunamadı."
-    # Bulunamazsa hata vererek çık
-    exit 1
-fi
-
-echo "Spark görevi çalıştırılıyor ($SCRIPT_REMOTE_PATH)..."
-# sshpass ile şifreyi kullanarak ssh bağlantısı yap ve Spark komutunu çalıştır
-sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ssh_train@spark_client "cd /tmp && \\
-spark-submit --master local[*] \\
---packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4 \\
---conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \\
---conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \\
---conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \\
---conf spark.hadoop.fs.s3a.access.key=dataops \\
---conf spark.hadoop.fs.s3a.secret.key=root12345 \\
---conf spark.hadoop.fs.s3a.path.style.access=true \\
---conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \\
-$SCRIPT_REMOTE_PATH" # Çalıştırılacak betik yolu/adı güncellendi
-
-echo "Spark görevi komutu gönderildi. Lokal repo temizleniyor."
-# İsteğe bağlı: Klonlanan repoyu temizle
-rm -rf "$LOCAL_REPO_PATH"
-
-echo "Görev tamamlandı."
-"""
-
-# BashOperator tanımı
-# Task ID'yi projenize daha uygun bir isimle değiştirebilirsiniz,
-# örneğin 'run_tmdb_data_generator'
 task_run_spark_transformation = BashOperator(
-    task_id='run_spark_transformation', 
-    bash_command=bash_command_script,
-    # Diğer parametreler (dag=dag, vb.)
+    task_id='run_spark_transformation',
+    bash_command="""
+        GIT_REPO_URL=<repo_url>
+        SSH_PASSWORD=$(airflow variables get ssh_train_password)
+        git clone $GIT_REPO_URL /tmp/tmdb_transformation_repo
+        scp /tmp/tmdb_transformation_repo/tmdb_transformation.py ssh_train@spark_client:/tmp/tmdb_transformation.py
+        sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no ssh_train@spark_client "cd /tmp && 
+        spark-submit --master local[*] 
+        --packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4
+        --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
+        --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog
+        --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000
+        --conf spark.hadoop.fs.s3a.access.key=dataops
+        --conf spark.hadoop.fs.s3a.secret.key=root12345
+        --conf spark.hadoop.fs.s3a.path.style.access=true
+        --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+        /tmp/tmdb_transformation.py"
+    """,
+    dag=dag,
 )
 
 # Görev bağımlılıklarını ayarla
