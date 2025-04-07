@@ -422,39 +422,44 @@ task_generate_spark_script = PythonOperator(
 
 # Spark dönüşümünü çalıştır
 
-# Betiğin Airflow worker üzerindeki tam yolu
-# BU YOLUN DOĞRU OLDUĞUNDAN VE DOSYANIN ORADA BULUNDUĞUNDAN EMİN OLUN!
-# Örneğin, DAG dosyanız /opt/airflow/dags/tmdb_dag.py ise ve betiği
-# /opt/airflow/dags/scripts/ altına koyduysanız bu yolu kullanabilirsiniz.
-local_script_full_path = "/opt/airflow/dags/scripts/tmdb_data_generator.py"
-
-# Bash komutunu Python string olarak tanımlayın
-# Dikkat: local_script_full_path değişkeni doğrudan string içine yerleştirildi.
+# Bash komutunu Python string olarak tanımlayın (Jinja templating ile)
 bash_command_script = """
 # Herhangi bir komut başarısız olursa betiği durdurur
 set -e
 
 # Airflow Variable'dan şifreyi almak için Jinja kullanın
-# (Jinja'nın string formatlama ile karışmaması için süslü parantezlere dikkat)
 SSH_PASSWORD="{{ var.value.ssh_train_password }}"
 
-# Kopyalanacak lokal betiğin yolu (Airflow worker üzerinde)
-# Bu yolun Airflow worker'ınızda geçerli olduğundan emin olun!
-LOCAL_SCRIPT='""" + local_script_full_path + """'
+# İndirilecek betiğin direkt URL'si (GitHub Raw)
+# Dikkat: URL'nin doğru olduğundan emin olun!
+SCRIPT_URL="https://raw.githubusercontent.com/Sonnyson23/Airflow_DeltaLake_Project/main/python_apps/tmdb_data_generator.py"
+
+# Betiğin indirileceği lokal geçici dosya yolu (Airflow worker üzerinde)
+LOCAL_SCRIPT_PATH="/tmp/tmdb_data_generator.py"
 
 # Betiğin kopyalanacağı hedef (remote) sunucudaki tam yol
-REMOTE_SCRIPT_PATH="/tmp/tmdb_data_generator.py"
+REMOTE_SCRIPT_PATH="/tmp/tmdb_data_generator.py" # Hedefte aynı isim kalsın
 
-# Lokal betik dosyasının varlığını kontrol et
-if [ ! -f "$LOCAL_SCRIPT" ]; then
-    echo "Hata: Lokal betik dosyası bulunamadı: $LOCAL_SCRIPT"
-    echo "Lütfen betiği doğru yola kopyaladığınızdan ve yolun DAG tanımında doğru yazıldığından emin olun."
+echo "Python betiği indiriliyor: $SCRIPT_URL -> $LOCAL_SCRIPT_PATH"
+# curl ile betiği indir (-f: hata varsa hemen çık, -s: sessiz mod, -L: yönlendirmeleri takip et, -o: çıktı dosyası)
+# Eğer curl yoksa wget deneyebilirsiniz: wget -q -O "$LOCAL_SCRIPT_PATH" "$SCRIPT_URL"
+curl -fsSL -o "$LOCAL_SCRIPT_PATH" "$SCRIPT_URL"
+
+# İndirme başarılı oldu mu kontrol et (curl -f ile hata durumunda 0'dan farklı çıkış kodu döner)
+if [ $? -ne 0 ]; then
+    echo "Hata: Python betiği indirilemedi: $SCRIPT_URL"
     exit 1
 fi
 
-echo "Lokal Python betiği ($LOCAL_SCRIPT) bulundu. $REMOTE_SCRIPT_PATH adresine kopyalanıyor..."
+# Dosyanın gerçekten oluşup oluşmadığını ve boş olmadığını kontrol et
+if [ ! -s "$LOCAL_SCRIPT_PATH" ]; then # -s: dosya var ve boyutu 0'dan büyük mü?
+    echo "Hata: İndirilen betik dosyası bulunamadı veya boş: $LOCAL_SCRIPT_PATH"
+    exit 1
+fi
+
+echo "Python betiği ($LOCAL_SCRIPT_PATH) bulundu. $REMOTE_SCRIPT_PATH adresine kopyalanıyor..."
 # scp ile betiği Spark client'a kopyala
-scp "$LOCAL_SCRIPT" "ssh_train@spark_client:$REMOTE_SCRIPT_PATH"
+scp "$LOCAL_SCRIPT_PATH" "ssh_train@spark_client:$REMOTE_SCRIPT_PATH"
 
 echo "Spark görevi çalıştırılıyor ($REMOTE_SCRIPT_PATH)..."
 # sshpass ile şifreyi kullanarak ssh bağlantısı yap ve Spark komutunu çalıştır
@@ -470,8 +475,9 @@ spark-submit --master local[*] \\
 --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \\
 $REMOTE_SCRIPT_PATH"
 
-echo "Spark görevi komutu gönderildi."
-# Lokal dosyayı silmeye gerek yok, DAG'ın/projenin bir parçası
+echo "Spark görevi komutu gönderildi. Lokal betik temizleniyor."
+# İndirilen lokal betiği temizle
+rm -f "$LOCAL_SCRIPT_PATH"
 
 echo "Görev tamamlandı."
 """
