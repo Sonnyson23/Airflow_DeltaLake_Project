@@ -65,13 +65,6 @@ def download_datasets(**context):
     return {"credits_path": f"{temp_dir}/tmdb_5000_credits.csv", 
             "movies_path": f"{temp_dir}/tmdb_5000_movies.csv"}
 
-
-find_file = BashOperator(
-    task_id='find_file',
-    bash_command="find / -name 'tmdb_5000_credits.csv' -print",
-    dag=dag,
-)
-
 # MinIO'ya veri yükleme fonksiyonu
 def upload_to_minio(**context):
     """İndirilen veri setlerini MinIO'ya yükler"""
@@ -409,6 +402,12 @@ task_download_datasets = PythonOperator(
     task_id='download_datasets',
     python_callable=download_datasets,
     provide_context=True,
+    dag=dag,
+)
+
+find_file = BashOperator(
+    task_id='find_file',
+    bash_command="find / -name 'tmdb_5000_credits.csv' -print",
     dag=dag,
 )
 
