@@ -65,6 +65,13 @@ def download_datasets(**context):
     return {"credits_path": f"{temp_dir}/tmdb_5000_credits.csv", 
             "movies_path": f"{temp_dir}/tmdb_5000_movies.csv"}
 
+
+find_file = BashOperator(
+    task_id='find_file',
+    bash_command="find / -name 'tmdb_5000_credits.csv' -print",
+    dag=dag,
+)
+
 # MinIO'ya veri yükleme fonksiyonu
 def upload_to_minio(**context):
     """İndirilen veri setlerini MinIO'ya yükler"""
@@ -440,4 +447,4 @@ task_run_spark_transformation = BashOperator(
 )
 
 # Görev bağımlılıklarını ayarla
-task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_run_spark_transformation
+task_download_datasets >> find_file >> task_upload_to_minio >> task_generate_spark_script >> task_run_spark_transformation
