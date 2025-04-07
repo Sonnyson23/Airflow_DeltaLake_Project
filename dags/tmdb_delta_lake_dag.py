@@ -428,11 +428,12 @@ task_copy_script_to_spark = BashOperator(
     dag=dag,
 )
 
-# Spark transformation'ı çalıştır (get_pty parametresi olmadan)
-task_run_spark_transformation = BashOperator(
+task_run_spark_transformation = SSHOperator(
     task_id='run_spark_transformation',
-    bash_command="""
-    docker exec spark_client spark-submit --master local[*] \
+    ssh_conn_id='spark_ssh_conn',
+    command="""
+    cd /tmp && \
+    spark-submit --master local[*] \
     --packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4 \
     --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \
     --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \
@@ -443,8 +444,10 @@ task_run_spark_transformation = BashOperator(
     --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
     /tmp/tmdb_transformation.py
     """,
+    get_pty=True,
     dag=dag,
 ) 
+
 
 # Task bağımlılıklarını güncelle
 task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_copy_script_to_spark >> task_run_spark_transformation
