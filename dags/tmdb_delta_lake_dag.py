@@ -422,52 +422,41 @@ task_generate_spark_script = PythonOperator(
 
 # Spark dönüşümünü çalıştır
 
+# Betiğin Airflow worker üzerindeki tam yolu
+# BU YOLUN DOĞRU OLDUĞUNDAN VE DOSYANIN ORADA BULUNDUĞUNDAN EMİN OLUN!
+# Örneğin, DAG dosyanız /opt/airflow/dags/tmdb_dag.py ise ve betiği
+# /opt/airflow/dags/scripts/ altına koyduysanız bu yolu kullanabilirsiniz.
+local_script_full_path = "/opt/airflow/dags/scripts/tmdb_data_generator.py"
 
-# Bash komutunu Python string olarak tanımlayın (Jinja templating ile)
+# Bash komutunu Python string olarak tanımlayın
+# Dikkat: local_script_full_path değişkeni doğrudan string içine yerleştirildi.
 bash_command_script = """
 # Herhangi bir komut başarısız olursa betiği durdurur
 set -e
 
-# Git repo URL'si
-GIT_REPO_URL="https://github.com/Sonnyson23/Airflow_DeltaLake_Project.git"
-
 # Airflow Variable'dan şifreyi almak için Jinja kullanın
+# (Jinja'nın string formatlama ile karışmaması için süslü parantezlere dikkat)
 SSH_PASSWORD="{{ var.value.ssh_train_password }}"
 
-# Klonlama yapılacak lokal dizin (öncekiyle karışmasın diye farklı isim)
-LOCAL_REPO_PATH="/tmp/tmdb_project_repo_cloned"
-
-# Kopyalanacak ve çalıştırılacak betiğin adı (Görseldeki gibi)
-SCRIPT_NAME="tmdb_data_generator.py"
-
-# Betiğin repo içindeki göreceli yolu (Görseldeki gibi)
-SCRIPT_REPO_RELATIVE_PATH="python_apps/$SCRIPT_NAME"
-
-# Betiğin klonlandıktan sonraki tam lokal yolu
-SCRIPT_LOCAL_FULL_PATH="$LOCAL_REPO_PATH/$SCRIPT_REPO_RELATIVE_PATH"
+# Kopyalanacak lokal betiğin yolu (Airflow worker üzerinde)
+# Bu yolun Airflow worker'ınızda geçerli olduğundan emin olun!
+LOCAL_SCRIPT='""" + local_script_full_path + """'
 
 # Betiğin kopyalanacağı hedef (remote) sunucudaki tam yol
-SCRIPT_REMOTE_PATH="/tmp/$SCRIPT_NAME"
+REMOTE_SCRIPT_PATH="/tmp/tmdb_data_generator.py"
 
-# Varsa önceki klonlanmış repoyu temizle
-rm -rf "$LOCAL_REPO_PATH"
-
-echo "Repo klonlanıyor: $GIT_REPO_URL -> $LOCAL_REPO_PATH"
-# Belirli bir dalı (main) klonla
-git clone --branch main $GIT_REPO_URL "$LOCAL_REPO_PATH"
-
-# Python betiğinin klonlanan repoda doğru yolda olup olmadığını kontrol et (Yol güncellendi)
-if [ -f "$SCRIPT_LOCAL_FULL_PATH" ]; then
-    echo "Python betiği ($SCRIPT_LOCAL_FULL_PATH) bulundu. $SCRIPT_REMOTE_PATH adresine kopyalanıyor..."
-    # scp ile betiği Spark client'a kopyala (Kaynak yol güncellendi)
-    scp "$SCRIPT_LOCAL_FULL_PATH" "ssh_train@spark_client:$SCRIPT_REMOTE_PATH"
-else
-    echo "Hata: $SCRIPT_NAME betiği klonlanan reponun '$SCRIPT_REPO_RELATIVE_PATH' dizininde bulunamadı."
-    # Bulunamazsa hata vererek çık
+# Lokal betik dosyasının varlığını kontrol et
+if [ ! -f "$LOCAL_SCRIPT" ]; then
+    echo "Hata: Lokal betik dosyası bulunamadı: $LOCAL_SCRIPT"
+    echo "Lütfen betiği doğru yola kopyaladığınızdan ve yolun DAG tanımında doğru yazıldığından emin olun."
     exit 1
 fi
 
-echo "Spark görevi çalıştırılıyor ($SCRIPT_REMOTE_PATH)..."
+echo "Lokal Python betiği ($LOCAL_SCRIPT) bulundu. $REMOTE_SCRIPT_PATH adresine kopyalanıyor..."
+# scp ile betiği Spark client'a kopyala
+scp "$LOCAL_SCRIPT" "ssh_train@spark_client:$REMOTE_SCRIPT_PATH"
+
+echo "Spark görevi çalıştırılıyor ($REMOTE_SCRIPT_PATH)..."
 # sshpass ile şifreyi kullanarak ssh bağlantısı yap ve Spark komutunu çalıştır
 sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ssh_train@spark_client "cd /tmp && \\
 spark-submit --master local[*] \\
@@ -479,11 +468,10 @@ spark-submit --master local[*] \\
 --conf spark.hadoop.fs.s3a.secret.key=root12345 \\
 --conf spark.hadoop.fs.s3a.path.style.access=true \\
 --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \\
-$SCRIPT_REMOTE_PATH" # Çalıştırılacak betik yolu/adı güncellendi
+$REMOTE_SCRIPT_PATH"
 
-echo "Spark görevi komutu gönderildi. Lokal repo temizleniyor."
-# İsteğe bağlı: Klonlanan repoyu temizle
-rm -rf "$LOCAL_REPO_PATH"
+echo "Spark görevi komutu gönderildi."
+# Lokal dosyayı silmeye gerek yok, DAG'ın/projenin bir parçası
 
 echo "Görev tamamlandı."
 """
