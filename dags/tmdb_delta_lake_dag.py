@@ -431,26 +431,22 @@ task_copy_script_to_spark = BashOperator(
 task_run_spark_transformation = SSHOperator(
     task_id='run_spark_transformation',
     ssh_conn_id='spark_ssh_conn',
-    command="""
-    # Spark'ın kullanacağı Python ortamına boto3 kur
-    pip install boto3 && \
+    # Komut string'ini f-string'e çeviriyoruz (başında f var)
+    command=f"""
     cd /tmp && \
     spark-submit --master local[*] \
     --packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4 \
     --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \
     --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \
-    --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
-    --conf spark.hadoop.fs.s3a.access.key=dataops \
-    --conf spark.hadoop.fs.s3a.secret.key=root12345 \
+    --conf spark.hadoop.fs.s3a.endpoint={MINIO_ENDPOINT} \
+    --conf spark.hadoop.fs.s3a.access.key={AWS_ACCESS_KEY} \
+    --conf spark.hadoop.fs.s3a.secret.key={AWS_SECRET_KEY} \
     --conf spark.hadoop.fs.s3a.path.style.access=true \
     --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
     /tmp/tmdb_transformation.py
     """,
-    # >>>>>>>>>>>> DEĞİŞİKLİK BURADA <<<<<<<<<<<<
-    cmd_timeout=3600,  # Komutun çalışması için izin verilen süre (saniye cinsinden, örn: 1 saat)
-    conn_timeout=60,   # Bağlantı zaman aşımı (isteğe bağlı, varsayılan genellikle yeterlidir)
-    # get_pty=True,    # Bu satırı kaldırabilir veya yorum satırı yapabilirsiniz
-    # >>>>>>>>>>>> DEĞİŞİKLİK BURADA <<<<<<<<<<<<
+    cmd_timeout=3600,  # Zaman aşımını uzun tutmaya devam ediyoruz
+    conn_timeout=60,
     dag=dag,
 )
 
