@@ -413,6 +413,7 @@ task_upload_to_minio = PythonOperator(
     dag=dag,
 )
 
+# Script'i oluştur
 task_generate_spark_script = PythonOperator(
     task_id='generate_spark_script',
     python_callable=generate_spark_transformation_script,
@@ -420,21 +421,18 @@ task_generate_spark_script = PythonOperator(
     dag=dag,
 )
 
-# Add a task to transfer the script to Spark container
-task_transfer_script = SSHOperator(
-    task_id='transfer_script',
-    ssh_conn_id='spark_ssh_conn',
-    command="mkdir -p /tmp",
+# Script'i Spark container'ına kopyala
+task_copy_script_to_spark = BashOperator(
+    task_id='copy_script_to_spark',
+    bash_command='docker cp {{ ti.xcom_pull(task_ids="generate_spark_script") }} spark_client:/tmp/tmdb_transformation.py',
     dag=dag,
 )
 
-# Run Spark transformation using SSHOperator instead of BashOperator
-task_run_spark_transformation = SSHOperator(
+# Spark transformation'ı çalıştır
+task_run_spark_transformation = BashOperator(
     task_id='run_spark_transformation',
-    ssh_conn_id='spark_ssh_conn',
-    command="""
-    cd /tmp && \
-    spark-submit --master local[*] \
+    bash_command="""
+    docker exec spark_client spark-submit --master local[*] \
     --packages io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4 \
     --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \
     --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \
@@ -447,7 +445,8 @@ task_run_spark_transformation = SSHOperator(
     """,
     get_pty=True,  # Add this for better error reporting
     dag=dag,
-)
+) 
 
-# Set task dependencies
-task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_transfer_script >> task_run_spark_transformation
+# Task bağımlılıklarını güncelle
+task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_copy_script_to_spark >> task_run_spark_transformation
+
