@@ -440,5 +440,5 @@ task_run_spark_transformation = BashOperator(
     dag=dag,
 )
 
-# Görev bağımlılıklarını ayarla
+# Görev bağımlılıklarını ayarla_
 task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_run_spark_transformation
