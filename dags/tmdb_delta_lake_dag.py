@@ -446,9 +446,13 @@ task_run_spark_transformation = SSHOperator(
     --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
     /tmp/tmdb_transformation.py
     """,
-    get_pty=True,
+    # >>>>>>>>>>>> DEĞİŞİKLİK BURADA <<<<<<<<<<<<
+    cmd_timeout=3600,  # Komutun çalışması için izin verilen süre (saniye cinsinden, örn: 1 saat)
+    conn_timeout=60,   # Bağlantı zaman aşımı (isteğe bağlı, varsayılan genellikle yeterlidir)
+    # get_pty=True,    # Bu satırı kaldırabilir veya yorum satırı yapabilirsiniz
+    # >>>>>>>>>>>> DEĞİŞİKLİK BURADA <<<<<<<<<<<<
     dag=dag,
-) 
+)
 
 
 # Task bağımlılıklarını güncelle
