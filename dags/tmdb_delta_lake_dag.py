@@ -428,7 +428,7 @@ task_copy_script_to_spark = BashOperator(
     dag=dag,
 )
 
-# Spark transformation'ı çalıştır
+# Spark transformation'ı çalıştır (get_pty parametresi olmadan)
 task_run_spark_transformation = BashOperator(
     task_id='run_spark_transformation',
     bash_command="""
@@ -443,10 +443,10 @@ task_run_spark_transformation = BashOperator(
     --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
     /tmp/tmdb_transformation.py
     """,
-    get_pty=True,  # Add this for better error reporting
     dag=dag,
 ) 
 
 # Task bağımlılıklarını güncelle
 task_download_datasets >> task_upload_to_minio >> task_generate_spark_script >> task_copy_script_to_spark >> task_run_spark_transformation
+
 
