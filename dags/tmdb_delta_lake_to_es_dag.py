@@ -100,7 +100,8 @@ with DAG(
         --conf spark.sql.warehouse.dir=s3a://{SILVER_BUCKET}/delta-warehouse \\
         --conf es.nodes=es \\
         --conf es.port=9200 \\
-        --conf es.nodes.wan.only=true \\ # <-- DEĞİŞİKLİK BURADA: false -> true
+        # --conf es.nodes.wan.only=... \\ # Bu satır varsa kaldırın veya yorumlayın
+        --conf es.nodes.discovery=false \\ # <-- BU SATIRI EKLEYİN/GÜNCELLEYİN
         {SPARK_SCRIPT_DEST_PATH} # Kopyalanan betiği çalıştır
 
     EXIT_CODE=$?
