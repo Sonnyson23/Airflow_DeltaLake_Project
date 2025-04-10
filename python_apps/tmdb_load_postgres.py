@@ -5,6 +5,7 @@ import boto3
 from botocore.client import Config
 from delta.tables import *
 from sqlalchemy import create_engine, text
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 import os
 
 # PostgreSQL connection details (Airflow Connection'dan alınacak)
