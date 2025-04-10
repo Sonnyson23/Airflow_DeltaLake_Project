@@ -263,22 +263,27 @@ task_copy_script_to_spark = BashOperator(
     dag=dag,
 )
 
+spark_submit_command = """
+echo 'Installing boto3...' && \
+pip install boto3 && \
+echo 'Running spark-submit...' && \
+cd /tmp && \
+spark-submit --master local[*] \
+--packages io.delta:delta-spark_2.12:3.2.0,org.postgresql:postgresql:42.6.0,org.apache.hadoop:hadoop-aws:3.3.4 \
+--conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \
+--conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \
+--conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
+--conf spark.hadoop.fs.s3a.access.key=dataops \
+--conf spark.hadoop.fs.s3a.secret.key='YOUR_MINIO_SECRET_KEY' \
+--conf spark.hadoop.fs.s3a.path.style.access=true \
+--conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+/tmp/tmdb_load_postgres.py
+"""
+
 task_run_spark_transformation = SSHOperator(
     task_id='run_spark_load_to_postgres',
-    ssh_conn_id='spark_ssh_conn',
-    command=f"""
-        cd /tmp && \
-        spark-submit --master local[*] \
-        --packages io.delta:delta-spark_2.12:3.2.0,org.postgresql:postgresql:42.6.0,org.apache.hadoop:hadoop-aws:3.3.4 \
-        --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension \
-        --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog \
-        --conf spark.hadoop.fs.s3a.endpoint={MINIO_ENDPOINT} \
-        --conf spark.hadoop.fs.s3a.access.key={AWS_ACCESS_KEY} \
-        --conf spark.hadoop.fs.s3a.secret.key={AWS_SECRET_KEY} \
-        --conf spark.hadoop.fs.s3a.path.style.access=true \
-        --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
-        /tmp/tmdb_load_postgres.py
-    """,
+    ssh_conn_id='spark_ssh_conn',  # Airflow UI'da tanımlı SSH bağlantınızın ID'si
+    command=spark_submit_command,
     cmd_timeout=3600,
     conn_timeout=60,
     dag=dag,
