@@ -1,177 +1,138 @@
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import *
-import boto3
-from botocore.client import Config
-from delta.tables import *
-from sqlalchemy import create_engine, text
-from airflow.providers.postgres.hooks.postgres import PostgresHook
+import argparse
+import logging
 import os
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F # Gerekirse veri dönüşümü için kullanılabilir
+from pyspark.sql.types import * # Gerekirse şema tanımlama için kullanılabilir
 
-# PostgreSQL connection details (Airflow Connection'dan alınacak)
-postgres_conn_id = "postgresql_conn"  # Airflow Connection ID'niz
+# Hata ayıklama ve bilgilendirme için loglama ayarları
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# MinIO connection details (Spark Conf'dan alınacak)
-minio_endpoint = spark.conf.get("spark.hadoop.fs.s3a.endpoint")
-aws_access_key = spark.conf.get("spark.hadoop.fs.s3a.access.key")
-aws_secret_key = spark.conf.get("spark.hadoop.fs.s3a.secret.key")
+def main():
+    """
+    Ana fonksiyon: Argümanları okur, Spark Session başlatır, Delta tablolarını okur
+    ve JDBC kullanarak PostgreSQL'e yazar.
+    """
+    # --- Argümanları Oku ---
+    parser = argparse.ArgumentParser(description="Load TMDB Delta tables to PostgreSQL using Spark JDBC.")
+    parser.add_argument("--jdbc-url", required=True, help="PostgreSQL JDBC URL (e.g., jdbc:postgresql://host:port/database)")
+    parser.add_argument("--pg-user", required=True, help="PostgreSQL username")
+    
+    try:
+        args = parser.parse_args()
+        logger.info("Command line arguments parsed successfully.")
+        logger.info(f"JDBC URL: {args.jdbc_url}")
+        logger.info(f"PostgreSQL User: {args.pg_user}")
+    except Exception as e:
+        logger.error(f"Error parsing command line arguments: {e}")
+        raise
 
-# S3 configuration for Delta Lake
-spark = SparkSession.builder \
-    .appName("TMDB Delta to PostgreSQL") \
-    .config("spark.jars.packages",
-            "io.delta:delta-spark_2.12:3.2.0,org.postgresql:postgresql:42.6.0,org.apache.hadoop:hadoop-aws:3.3.4") \
-    .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
-    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
-    .config("spark.hadoop.fs.s3a.endpoint", spark.conf.get("spark.hadoop.fs.s3a.endpoint")) \
-    .config("spark.hadoop.fs.s3a.access.key", spark.conf.get("spark.hadoop.fs.s3a.access.key")) \
-    .config("spark.hadoop.fs.s3a.secret.key", spark.conf.get("spark.hadoop.fs.s3a.secret.key")) \
-    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-    .config("spark.sql.warehouse.dir", f"s3a://tmdb-silver/delta-warehouse") \
-    .getOrCreate()
+    pg_password = os.environ.get('PG_PASSWORD')
+    if not pg_password:
+        logger.error("Environment variable PG_PASSWORD is not set.")
+        # Uygulamanın şifre olmadan devam etmesini engellemek için hata veriyoruz.
+        raise ValueError("PostgreSQL password not found in environment variable PG_PASSWORD")
+    logger.info("PostgreSQL password retrieved from environment variable PG_PASSWORD.")
+    # --------------------------------------------
 
-# Read Delta Lake tables
-delta_path = "s3a://tmdb-silver/"
-cast_df = spark.read.format("delta").load(delta_path + "cast")
-crew_df = spark.read.format("delta").load(delta_path + "crew")
-movies_df = spark.read.format("delta").load(delta_path + "movies")
-genres_df = spark.read.format("delta").load(delta_path + "genres")
-keywords_df = spark.read.format("delta").load(delta_path + "keywords")
-production_companies_df = spark.read.format("delta").load(delta_path + "production_companies")
-production_countries_df = spark.read.format("delta").load(delta_path + "production_countries")
-spoken_languages_df = spark.read.format("delta").load(delta_path + "spoken_languages")
+    # --- Spark Session Başlatma ---
+    # Konfigürasyonlar (paketler, S3, Delta) spark-submit komutu ile dışarıdan verilecek.
+    try:
+        spark = SparkSession.builder \
+            .appName("TMDB Delta to PostgreSQL JDBC Loader") \
+            .getOrCreate()
+        logger.info("Spark Session created successfully.")
+        # Gerekirse S3 endpoint'ini loglayarak kontrol edebilirsiniz:
+        # s3_endpoint = spark.sparkContext.getConf().get("spark.hadoop.fs.s3a.endpoint", "Not Set")
+        # logger.info(f"Spark configured with S3A endpoint: {s3_endpoint}")
+    except Exception as e:
+        logger.error(f"Failed to create Spark Session: {e}")
+        raise
+    # ------------------------------------
 
-# PostgreSQL connection details (Airflow Connection kullanılarak alınmalı)
-hook = PostgresHook(postgres_conn_id=postgres_conn_id)
-engine = hook.get_sqlalchemy_engine()
+    # --- Kaynak ve Hedef Tabloları Tanımla ---
+    delta_base_path = "s3a://tmdb-silver/" # Airflow'daki SILVER_BUCKET değişkenine karşılık gelmeli
+    # Yüklenecek Delta tabloları ve karşılık gelen PostgreSQL tablo adları (schema dahil)
+    tables_to_process = {
+        "movies": "public.movies",
+        "cast": "public.cast",
+        "crew": "public.crew",
+        "genres": "public.genres",
+        "keywords": "public.keywords",
+        "production_companies": "public.production_companies",
+        "production_countries": "public.production_countries",
+        "spoken_languages": "public.spoken_languages"
+    }
+    # ------------------------------------------
 
+    # --- Delta Tablolarını Oku ve PostgreSQL'e Yaz ---
+    # JDBC yazma seçenekleri (şifre hariç hepsi argümanlardan)
+    jdbc_write_options = {
+        "url": args.jdbc_url,
+        "user": args.pg_user,
+        "password": pg_password, # Ortam değişkeninden alınan şifre
+        "driver": "org.postgresql.Driver" # PostgreSQL JDBC driver sınıfı
+    }
 
-def execute_sql(sql_statement):
-    with engine.begin() as conn:
-        conn.execute(text(sql_statement))
+    logger.info("Starting process to read Delta tables and write to PostgreSQL...")
+    processed_tables = 0
+    failed_tables = []
 
+    for delta_suffix, pg_table_name in tables_to_process.items():
+        delta_path = f"{delta_base_path}{delta_suffix}"
+        logger.info(f"--- Processing table: {delta_suffix} ---")
+        logger.info(f"Reading from Delta path: {delta_path}")
 
-# Create tables with primary and foreign keys
-execute_sql("""
-CREATE TABLE IF NOT EXISTS movies (
-    movie_id INT PRIMARY KEY,
-    title VARCHAR(255),
-    budget DOUBLE PRECISION,
-    homepage VARCHAR(255),
-    original_language VARCHAR(10),
-    original_title VARCHAR(255),
-    overview TEXT,
-    popularity FLOAT,
-    release_date DATE,
-    revenue DOUBLE PRECISION,
-    runtime INT,
-    status VARCHAR(20),
-    tagline VARCHAR(255),
-    vote_average FLOAT,
-    vote_count INT
-);
-""")
+        try:
+            # Delta tablosunu oku
+            delta_df = spark.read.format("delta").load(delta_path)
+            count = delta_df.count()
+            logger.info(f"Successfully read {count} rows from {delta_path}.")
 
-execute_sql("""
-CREATE TABLE IF NOT EXISTS cast (
-    movie_id INT,
-    cast_id INT,
-    character VARCHAR(255),
-    credit_id VARCHAR(255),
-    gender INT,
-    id INT,
-    name VARCHAR(255),
-    PRIMARY KEY (movie_id, cast_id),
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
-);
-""")
+            # Gerekirse burada DataFrame üzerinde dönüşümler (transformations) yapılabilir.
+            # Örnek: delta_df = delta_df.withColumn("load_timestamp", F.current_timestamp())
 
-execute_sql("""
-CREATE TABLE IF NOT EXISTS crew (
-    movie_id INT,
-    credit_id VARCHAR(255) PRIMARY KEY,
-    department VARCHAR(100),
-    gender INT,
-    id INT,
-    job VARCHAR(100),
-    name VARCHAR(255),
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
-);
-""")
+            # Veriyi PostgreSQL'e yaz
+            logger.info(f"Writing {count} rows to PostgreSQL table: {pg_table_name}")
+            (delta_df.write
+             .format("jdbc")
+             .options(**jdbc_write_options) # Ortak seçenekleri uygula
+             .option("dbtable", pg_table_name) # Hedef tabloyu belirt
+             .mode("overwrite") # Mod: overwrite (üzerine yaz), append (ekle)
+             .save())
+            logger.info(f"Successfully wrote data to {pg_table_name}.")
+            processed_tables += 1
 
-execute_sql("""
-CREATE TABLE IF NOT EXISTS genres (
-    movie_id INT,
-    id INT,
-    name VARCHAR(100),
-    PRIMARY KEY (movie_id, id),
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
-);
-""")
+        except Exception as e:
+            # Hata durumunda loglama yap ve başarısız tabloyu kaydet
+            logger.error(f"FAILED to process table {delta_suffix}. Error: {e}", exc_info=True)
+            failed_tables.append(delta_suffix)
+            # Hata anında durmak yerine diğer tablolara devam etmek için 'raise' yorum satırı yapıldı.
+            # Eğer ilk hatada durmasını istiyorsanız aşağıdaki satırı aktif edin:
+            # raise
 
-execute_sql("""
-CREATE TABLE IF NOT EXISTS keywords (
-    movie_id INT,
-    id INT,
-    name VARCHAR(100),
-    PRIMARY KEY (movie_id, id),
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
-);
-""")
+    logger.info("--- Processing Summary ---")
+    logger.info(f"Successfully processed {processed_tables} out of {len(tables_to_process)} tables.")
+    if failed_tables:
+        logger.warning(f"Failed to process the following tables: {', '.join(failed_tables)}")
+    else:
+        logger.info("All tables processed successfully.")
+    # -----------------------------------------------
 
-execute_sql("""
-CREATE TABLE IF NOT EXISTS production_companies (
-    movie_id INT,
-    id INT,
-    name VARCHAR(255),
-    PRIMARY KEY (movie_id, id),
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
-);
-""")
+    # --- Spark Session'ı Durdur ---
+    try:
+        spark.stop()
+        logger.info("Spark Session stopped.")
+    except Exception as e:
+        # Spark durdurulurken hata olursa sadece uyar
+        logger.warning(f"An error occurred while stopping Spark Session: {e}", exc_info=True)
+    # --------------------------
 
-execute_sql("""
-CREATE TABLE IF NOT EXISTS production_countries (
-    movie_id INT,
-    iso_3166_1 VARCHAR(10),
-    name VARCHAR(255),
-    PRIMARY KEY (movie_id, iso_3166_1),
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
-);
-""")
+    # Eğer herhangi bir tablo işlenirken hata olduysa betiğin hata koduyla çıkmasını sağla
+    if failed_tables:
+        exit(1)
 
-execute_sql("""
-CREATE TABLE IF NOT EXISTS spoken_languages (
-    movie_id INT,
-    iso_639_1 VARCHAR(10),
-    name VARCHAR(100),
-    PRIMARY KEY (movie_id, iso_639_1),
-    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
-);
-""")
-
-
-# Write DataFrames to PostgreSQL (after tables are created)
-def write_df_to_postgres(df, table_name):
-    df.write.format("jdbc") \
-        .option("url", engine.url) \
-        .option("dbtable", table_name) \
-        .option("user", engine.url.username) \
-        .option("password", engine.url.password) \
-        .option("driver", "org.postgresql.Driver") \
-        .mode("overwrite") \
-        .save()
-
-
-write_df_to_postgres(cast_df, "cast")
-write_df_to_postgres(crew_df, "crew")
-write_df_to_postgres(movies_df, "movies")
-write_df_to_postgres(genres_df, "genres")
-write_df_to_postgres(keywords_df, "keywords")
-write_df_to_postgres(production_companies_df, "production_companies")
-write_df_to_postgres(production_countries_df, "production_countries")
-write_df_to_postgres(spoken_languages_df, "spoken_languages")
-
-print("Delta Lake tables loaded to PostgreSQL with schema definitions.")
-
-spark.stop()
+# Betik doğrudan çalıştırıldığında main fonksiyonunu çağır
+if __name__ == "__main__":
+    main()

@@ -11,8 +11,10 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.models import Variable
 from airflow.providers.ssh.operators.ssh import SSHOperator
+from airflow.hooks.base import BaseHook
+from airflow.providers.ssh.operators.ssh import SSHOperator
 from airflow.providers.ssh.hooks.ssh import SSHHook
-from airflow.providers.postgres.hooks.postgres import PostgresHook
+
 
 
 # DAG definition and default arguments
@@ -38,6 +40,12 @@ SILVER_BUCKET = "tmdb-silver"
 
 # PostgreSQL connection ID
 POSTGRES_CONN_ID = 'postgresql_conn'
+
+pg_conn = BaseHook.get_connection('postgresql_conn')
+jdbc_url = f"jdbc:postgresql://{pg_conn.host}:{pg_conn.port or 5432}/{pg_conn.schema}" # Port yoksa 5432 varsayalım
+pg_user = pg_conn.login
+pg_password = pg_conn.password # Şifre yönetimine dikkat!
+target_table = "public.your_target_table_name" # Hedef tablo adı
 
 
 # PySpark code for reading Delta tables and loading to PostgreSQL
