@@ -81,11 +81,13 @@ with DAG(
 
     # --- Görev 2: Spark İşini SSH ile Çalıştır (ES Hedefli) ---
 
-    # spark-submit komutu (ES için yapılandırıldı, PG argümanları kaldırıldı)
+# spark-submit komutu (ES için yapılandırıldı)
     spark_submit_command = f"""
     echo '--- SSHOperator: Starting Spark Job Execution (Delta to ES) ---' && \\
     echo 'Installing dependencies (boto3)...' && \\
     pip install boto3 && \\
+    echo 'Setting execute permission on script...' && \\
+    chmod +x {SPARK_SCRIPT_DEST_PATH} && \\  # <-- *** EKLENMESİ GEREKEN SATIR ***
     echo 'Running spark-submit...' && \\
     cd /tmp && \\
     spark-submit --master local[*] \\
@@ -100,8 +102,7 @@ with DAG(
         --conf spark.sql.warehouse.dir=s3a://{SILVER_BUCKET}/delta-warehouse \\
         --conf es.nodes=es \\
         --conf es.port=9200 \\
-        # --conf es.nodes.wan.only=... \\ # Bu satır varsa kaldırın veya yorumlayın
-        --conf es.nodes.discovery=false \\ # <-- BU SATIRI EKLEYİN/GÜNCELLEYİN
+        --conf es.nodes.discovery=false \\
         {SPARK_SCRIPT_DEST_PATH} # Kopyalanan betiği çalıştır
 
     EXIT_CODE=$?
