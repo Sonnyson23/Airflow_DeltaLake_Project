@@ -82,9 +82,25 @@ def main():
         logger.info(f"--- Processing table: {delta_suffix} ---")
         logger.info(f"Reading from Delta path: {delta_path}")
         try:
+            # Delta tablosunu oku
             delta_df = spark.read.format("delta").load(delta_path)
             count = delta_df.count()
             logger.info(f"Successfully read {count} rows from {delta_path}.")
+
+            # --- >>> VERİYİ İNCELEME KISMINI BURAYA EKLEYİN (Sadece 'movies' için) <<< ---
+            if delta_suffix == "movies":
+                logger.info("--- Inspecting movies_df Schema ---")
+                delta_df.printSchema()
+                logger.info("--- Inspecting movies_df Data (Sample) ---")
+                # İlk 10 satırı gösterelim, sütunları kesmeden (truncate=False)
+                delta_df.show(10, False)
+                logger.info("--- Finished Inspecting movies_df ---")
+            # --- >>> İNCELEME KISMI SONU <<< ---
+
+            # Gerekirse burada DataFrame üzerinde dönüşümler (transformations) yapılabilir.
+            # Örnek: delta_df = delta_df.withColumn("load_timestamp", F.current_timestamp())
+
+
 
             logger.info(f"Writing {count} rows to PostgreSQL table: {pg_table_name}")
             (delta_df.write
