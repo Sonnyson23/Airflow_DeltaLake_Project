@@ -3,6 +3,7 @@ import os
 import requests
 import json
 import time
+import boto3
 from typing import Dict, List, Any
 
 from airflow import DAG
@@ -12,6 +13,7 @@ from airflow.models import Variable
 from airflow.providers.ssh.operators.ssh import SSHOperator
 from airflow.providers.ssh.hooks.ssh import SSHHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+
 
 # DAG definition and default arguments
 default_args = {
@@ -264,8 +266,8 @@ task_copy_script_to_spark = BashOperator(
 )
 
 spark_submit_command = """
-echo 'Installing boto3...' && \
-pip install boto3 && \
+echo 'Installing dependencies (boto3, postgres provider)...' && \
+pip install boto3 apache-airflow-providers-postgres && \
 echo 'Running spark-submit...' && \
 cd /tmp && \
 spark-submit --master local[*] \
