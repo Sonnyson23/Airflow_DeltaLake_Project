@@ -32,7 +32,7 @@ MINIO_SECRET_KEY = Variable.get("minio_secret_key", default_var="Ankara06") # de
 # --- Spark Betik Konfigürasyonu ---
 # !!! ÇOK ÖNEMLİ: Bu yolu, statik Spark betiğinizin Airflow ortamındaki
 # (DAG'larınızın senkronize edildiği/mount edildiği yerdeki) DOĞRU konumuyla güncelleyin !!!
-SPARK_SCRIPT_SOURCE_PATH = "/opt/airflow/dags/repo/spark_scripts/tmdb_load_postgres.py"
+SPARK_SCRIPT_SOURCE_PATH = "/opt/airflow/code_base/Airflow_DeltaLake_Project/spark_scripts/tmdb_load_postgres.py"
 SPARK_SCRIPT_DEST_PATH = "/tmp/tmdb_load_postgres.py" # spark_client container'ı içindeki hedef yol
 
 # --- Spark Konfigürasyonu ---
