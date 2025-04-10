@@ -100,7 +100,7 @@ with DAG(
         --conf spark.hadoop.fs.s3a.path.style.access=true \\
         --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \\
         --conf spark.sql.warehouse.dir=s3a://{SILVER_BUCKET}/delta-warehouse \\
-        --conf es.nodes=es \\
+         --conf es.nodes=http://es \\ # <-- DEĞİŞİKLİK BURADA: http:// eklendi
         --conf es.port=9200 \\
         --conf es.nodes.discovery=false \\
         {SPARK_SCRIPT_DEST_PATH} # Kopyalanan betiği çalıştır
