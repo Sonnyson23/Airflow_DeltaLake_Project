@@ -35,7 +35,8 @@ SPARK_SSH_CONN_ID = 'spark_ssh_conn'
 SILVER_BUCKET = "tmdb-silver"
 
 # PostgreSQL connection ID
-POSTGRES_CONN_ID = 'postgres_default'
+POSTGRES_CONN_ID = 'postgresql_conn'
+
 
 # PySpark code for reading Delta tables and loading to PostgreSQL
 def generate_spark_load_postgres_script(**context):
@@ -53,43 +54,34 @@ from pyspark.sql.types import *
 import boto3
 from botocore.client import Config
 from delta.tables import *
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import os
 
-# PostgreSQL connection details
-postgres_user = "{postgres_user}"
-postgres_password = "{postgres_password}"
-postgres_db = "{postgres_db}"
-postgres_host = "{postgres_host}"
-postgres_port = "5432"
-jdbc_url = f"jdbc:postgresql://{{postgres_host}}:{postgres_port}/{{postgres_db}}"
-pg_properties = {{
-    "user": postgres_user,
-    "password": postgres_password,
-    "driver": "org.postgresql.Driver"
-}}
+# PostgreSQL connection details (Airflow Connection'dan alınacak)
+postgres_conn_id = "postgresql_conn"  # Airflow Connection ID'niz
 
-# MinIO connection information
-minio_endpoint = "http://minio:9000"
-aws_access_key = "dataops"
-aws_secret_key = "root12345"
+# MinIO connection details (Spark Conf'dan alınacak)
+minio_endpoint = "{MINIO_ENDPOINT}"
+aws_access_key = "{AWS_ACCESS_KEY}"
+aws_secret_key = "{AWS_SECRET_KEY}"
 
 # S3 configuration for Delta Lake
-spark = SparkSession.builder \\
-    .appName("TMDB Delta to PostgreSQL") \\
-    .config("spark.jars.packages", "io.delta:delta-spark_2.12:3.2.0,org.postgresql:postgresql:42.6.0,org.apache.hadoop:hadoop-aws:3.3.4") \\
-    .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \\
-    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \\
-    .config("spark.hadoop.fs.s3a.endpoint", minio_endpoint) \\
-    .config("spark.hadoop.fs.s3a.access.key", aws_access_key) \\
-    .config("spark.hadoop.fs.s3a.secret.key", aws_secret_key) \\
-    .config("spark.hadoop.fs.s3a.path.style.access", "true") \\
-    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \\
-    .config("spark.sql.warehouse.dir", f"s3a://{{SILVER_BUCKET}}/delta-warehouse") \\
+spark = SparkSession.builder \
+    .appName("TMDB Delta to PostgreSQL") \
+    .config("spark.jars.packages",
+            "io.delta:delta-spark_2.12:3.2.0,org.postgresql:postgresql:42.6.0,org.apache.hadoop:hadoop-aws:3.3.4") \
+    .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
+    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
+    .config("spark.hadoop.fs.s3a.endpoint", minio_endpoint) \
+    .config("spark.hadoop.fs.s3a.access.key", aws_access_key) \
+    .config("spark.hadoop.fs.s3a.secret.key", aws_secret_key) \
+    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+    .config("spark.sql.warehouse.dir", f"s3a://tmdb-silver/delta-warehouse") \
     .getOrCreate()
 
 # Read Delta Lake tables
-delta_path = "s3a://{SILVER_BUCKET}/"
+delta_path = "s3a://tmdb-silver/"
 cast_df = spark.read.format("delta").load(delta_path + "cast")
 crew_df = spark.read.format("delta").load(delta_path + "crew")
 movies_df = spark.read.format("delta").load(delta_path + "movies")
@@ -99,17 +91,137 @@ production_companies_df = spark.read.format("delta").load(delta_path + "producti
 production_countries_df = spark.read.format("delta").load(delta_path + "production_countries")
 spoken_languages_df = spark.read.format("delta").load(delta_path + "spoken_languages")
 
-# Write to PostgreSQL
-cast_df.write.jdbc(url=jdbc_url, table="cast", mode="overwrite", properties=pg_properties)
-crew_df.write.jdbc(url=jdbc_url, table="crew", mode="overwrite", properties=pg_properties)
-movies_df.write.jdbc(url=jdbc_url, table="movies", mode="overwrite", properties=pg_properties)
-genres_df.write.jdbc(url=jdbc_url, table="genres", mode="overwrite", properties=pg_properties)
-keywords_df.write.jdbc(url=jdbc_url, table="keywords", mode="overwrite", properties=pg_properties)
-production_companies_df.write.jdbc(url=jdbc_url, table="production_companies", mode="overwrite", properties=pg_properties)
-production_countries_df.write.jdbc(url=jdbc_url, table="production_countries", mode="overwrite", properties=pg_properties)
-spoken_languages_df.write.jdbc(url=jdbc_url, table="spoken_languages", mode="overwrite", properties=pg_properties)
+# PostgreSQL connection details (Airflow Connection kullanılarak alınmalı)
+hook = PostgresHook(postgres_conn_id=postgres_conn_id)
+engine = hook.get_sqlalchemy_engine()
 
-print("Delta Lake tables loaded to PostgreSQL.")
+
+def execute_sql(sql_statement):
+    with engine.begin() as conn:
+        conn.execute(text(sql_statement))
+
+
+# Create tables with primary and foreign keys
+execute_sql(\"""
+CREATE TABLE IF NOT EXISTS movies (
+    movie_id INT PRIMARY KEY,
+    title VARCHAR(255),
+    budget DOUBLE PRECISION,
+    homepage VARCHAR(255),
+    original_language VARCHAR(10),
+    original_title VARCHAR(255),
+    overview TEXT,
+    popularity FLOAT,
+    release_date DATE,
+    revenue DOUBLE PRECISION,
+    runtime INT,
+    status VARCHAR(20),
+    tagline VARCHAR(255),
+    vote_average FLOAT,
+    vote_count INT
+);
+\"\"\")
+
+execute_sql(\"""
+CREATE TABLE IF NOT EXISTS cast (
+    movie_id INT,
+    cast_id INT,
+    character VARCHAR(255),
+    credit_id VARCHAR(255),
+    gender INT,
+    id INT,
+    name VARCHAR(255),
+    PRIMARY KEY (movie_id, cast_id),
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+);
+\"\"\")
+
+execute_sql(\"""
+CREATE TABLE IF NOT EXISTS crew (
+    movie_id INT,
+    credit_id VARCHAR(255) PRIMARY KEY,
+    department VARCHAR(100),
+    gender INT,
+    id INT,
+    job VARCHAR(100),
+    name VARCHAR(255),
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+);
+\"\"\")
+
+execute_sql(\"""
+CREATE TABLE IF NOT EXISTS genres (
+    movie_id INT,
+    id INT,
+    name VARCHAR(100),
+    PRIMARY KEY (movie_id, id),
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+);
+\"\"\")
+
+execute_sql(\"""
+CREATE TABLE IF NOT EXISTS keywords (
+    movie_id INT,
+    id INT,
+    name VARCHAR(100),
+    PRIMARY KEY (movie_id, id),
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+);
+\"\"\")
+
+execute_sql(\"""
+CREATE TABLE IF NOT EXISTS production_companies (
+    movie_id INT,
+    id INT,
+    name VARCHAR(255),
+    PRIMARY KEY (movie_id, id),
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+);
+\"\"\")
+
+execute_sql(\"""
+CREATE TABLE IF NOT EXISTS production_countries (
+    movie_id INT,
+    iso_3166_1 VARCHAR(10),
+    name VARCHAR(255),
+    PRIMARY KEY (movie_id, iso_3166_1),
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+);
+\"\"\")
+
+execute_sql(\"""
+CREATE TABLE IF NOT EXISTS spoken_languages (
+    movie_id INT,
+    iso_639_1 VARCHAR(10),
+    name VARCHAR(100),
+    PRIMARY KEY (movie_id, iso_639_1),
+    FOREIGN KEY (movie_id) REFERENCES movies(movie_id)
+);
+\"\"\")
+
+
+# Write DataFrames to PostgreSQL (after tables are created)
+def write_df_to_postgres(df, table_name):
+    df.write.format("jdbc") \
+        .option("url", engine.url) \
+        .option("dbtable", table_name) \
+        .option("user", engine.url.username) \
+        .option("password", engine.url.password) \
+        .option("driver", "org.postgresql.Driver") \
+        .mode("overwrite") \
+        .save()
+
+
+write_df_to_postgres(cast_df, "cast")
+write_df_to_postgres(crew_df, "crew")
+write_df_to_postgres(movies_df, "movies")
+write_df_to_postgres(genres_df, "genres")
+write_df_to_postgres(keywords_df, "keywords")
+write_df_to_postgres(production_companies_df, "production_companies")
+write_df_to_postgres(production_countries_df, "production_countries")
+write_df_to_postgres(spoken_languages_df, "spoken_languages")
+
+print("Delta Lake tables loaded to PostgreSQL with schema definitions.")
 
 spark.stop()
     """
@@ -124,11 +236,12 @@ spark.stop()
 
     return script_path
 
+
 # DAG definition
 dag = DAG(
-    'tmdb_delta_lake_to_postgres',
+    'tmdb_delta_lake_to_postgres_dag',
     default_args=default_args,
-    description='Pipeline to load TMDB Delta Lake data from MinIO to PostgreSQL',
+    description='Pipeline to load TMDB Delta Lake data from MinIO to PostgreSQL with schema definitions',
     schedule_interval='@daily',
     start_date=datetime(2025, 4, 7),
     catchup=False,
