@@ -35,7 +35,7 @@ SPARK_SCRIPT_DEST_PATH = "/tmp/tmdb_delta_to_es.py" # spark_client içindeki hed
 
 # --- Spark Konfigürasyonu ---
 # Elasticsearch Spark Connector versiyonunu kontrol edin (Spark 3.5 ve ES 8.16.1 ile uyumlu olmalı)
-ES_SPARK_CONNECTOR_VERSION = "8.11.4" # Örnek versiyon
+ES_SPARK_CONNECTOR_VERSION = "8.11.4" # Bu versiyonu 8.16.1 ile uyumlu bir versiyonla değiştirin
 # Spark paketleri (PostgreSQL JDBC kaldırıldı, ES eklendi)
 SPARK_PACKAGES = f"io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4,org.elasticsearch:elasticsearch-spark-30_2.12:{ES_SPARK_CONNECTOR_VERSION}"
 SILVER_BUCKET = "tmdb-silver"
@@ -100,9 +100,12 @@ with DAG(
         --conf spark.hadoop.fs.s3a.path.style.access=true \\
         --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \\
         --conf spark.sql.warehouse.dir=s3a://{SILVER_BUCKET}/delta-warehouse \\
-         --conf es.nodes=http://es \\ # <-- DEĞİŞİKLİK BURADA: http:// eklendi
+        --conf es.nodes=es \\ 
         --conf es.port=9200 \\
         --conf es.nodes.discovery=false \\
+        --conf es.net.http.auth.user="" \\
+        --conf es.net.http.auth.pass="" \\
+        --conf es.net.ssl=false \\
         {SPARK_SCRIPT_DEST_PATH} # Kopyalanan betiği çalıştır
 
     EXIT_CODE=$?

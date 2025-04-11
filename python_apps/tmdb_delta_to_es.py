@@ -14,15 +14,16 @@ def main():
     Ana fonksiyon: Spark Session başlatır, MinIO'daki Delta tablolarını okur
     ve Elasticsearch'e yazar.
     """
-    # --- Argüman Okuma Kaldırıldı ---
-    # parser = argparse.ArgumentParser(...)
-    # args = parser.parse_args()
-    # --------------------------
-
-    # --- Ortam Değişkeni Okuma Kaldırıldı ---
-    # pg_password = os.environ.get('PG_PASSWORD')
-    # ...
-    # ---------------------------------------
+    # ES bağlantı testi
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["curl", "-X", "GET", "http://es:9200"],
+            capture_output=True, text=True, check=True
+        )   
+        logger.info(f"ES Connection Test Result: {result.stdout}")
+    except Exception as e:
+        logger.error(f"ES Connection Test Failed: {e}")
 
     # --- Spark Session Başlatma ---
     # Konfigürasyonlar (paketler, S3, Delta, ES) spark-submit komutu ile dışarıdan verilecek.
@@ -62,6 +63,10 @@ def main():
         "es.mapping.id": "movie_id", # Hangi sütunun ES _id alanı olacağı (varsa)
                                      # Bu sadece 'movies' için uygun olabilir, diğerleri için kaldırılabilir.
         "es.index.auto.create": "true" # Index yoksa otomatik oluşturulsun
+        "es.mapping.id": "movie_id",
+        "es.index.auto.create": "true",
+        "es.nodes.wan.only": "false",
+        "es.nodes.discovery": "false"
     }
     # -----------------------------------
 
