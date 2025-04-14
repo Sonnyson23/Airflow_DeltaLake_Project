@@ -4,6 +4,7 @@ from airflow.operators.bash import BashOperator
 from airflow.utils.email import send_email
 from airflow.models import TaskInstance
 from airflow.utils.state import State
+from airflow.providers.ssh.operators.ssh import SSHOperator
 
 start_date = datetime(2025, 3, 11)
 
@@ -41,7 +42,7 @@ with DAG(
     
     t0 = BashOperator(task_id='ls_data', bash_command='ls -l /tmp', retries=2, retry_delay=timedelta(seconds=15))
 
-    t1 = sshOperator(task_id='download_data',
+    t1 = SSHOperator(task_id='download_data',
                       bash_command='curl -L -o /tmp/dirty_store_transactions.csv https://github.com/erkansirin78/datasets/raw/master/dirty_store_transactions.csv',
                       retries=2, retry_delay=timedelta(seconds=15))
 
