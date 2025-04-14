@@ -6,7 +6,7 @@ from airflow.models import TaskInstance
 from airflow.utils.state import State
 
 
-start_date = datetime(2025, 3, 11)
+start_date = datetime(2025, 5, 11)
 
 # callback fonksiyonu
 def notify_email_on_failure(context):
@@ -39,7 +39,7 @@ with DAG(
     schedule_interval='@daily',
     catchup=False,
     on_failure_callback=notify_email_on_failure
-) as dag
+) as dag:
     
     t0 = BashOperator(task_id='ls_data', bash_command='ls -l /tmp', retries=2, retry_delay=timedelta(seconds=15))
 
