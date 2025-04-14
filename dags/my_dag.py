@@ -42,8 +42,8 @@ with DAG(
     
     t0 = BashOperator(task_id='ls_data', bash_command='ls -l /tmp', retries=2, retry_delay=timedelta(seconds=15))
 
-    t1 = SSHOperator(task_id='download_data',
-                      bash_command='curl -L -o /tmp/dirty_store_transactions.csv https://github.com/erkansirin78/datasets/raw/master/dirty_store_transactions.csv',
+    t1 = BashOperator(task_id='download_data',
+                      bash_command='curl -L -o /tmp/dirty_store_transactions.csv https://raw.githubusercontent.com/erkansirin78/datasets/refs/heads/master/churn-telecom/cell2celltrain.csv',
                       retries=2, retry_delay=timedelta(seconds=15))
 
     t2 = BashOperator(task_id='check_file_exists', bash_command='sha256sum /tmp/dirty_store_transactions.csv',
